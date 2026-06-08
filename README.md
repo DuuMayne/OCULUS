@@ -1,433 +1,364 @@
-# OCULUS
+# OCULUS — Operational Control Unified Logic & Uniform Scoring
 
-*Operational Control Unified Logic & Uniform Scoring*
+Continuously monitors your critical security controls and alerts you the moment something drifts out of compliance. Instead of finding out at audit time that MFA was disabled three months ago, OCULUS checks your controls every few hours and sends a Slack message the instant a control fails.
 
-*Proof > Posture*
+Connect your Okta, GitHub, and AWS accounts once. OCULUS handles the rest — running checks on a schedule, storing evidence snapshots, and giving you a live dashboard of what's passing and what's not.
 
-Security control monitoring service. Continuously evaluates critical security and compliance controls across Okta, GitHub, and AWS, producing deterministic pass/fail results with evidence snapshots and Slack alerts on drift.
+**What it monitors:**
+- **Okta:** MFA enrolled for all active users, no users inactive beyond threshold
+- **GitHub:** Branch protection on critical repos, no direct pushes to main, secret scanning enabled
+- **AWS:** CloudTrail audit logging active, root account has MFA, no stale IAM access keys, all S3 buckets encrypted, no publicly accessible S3 buckets
 
-This is not a GRC platform. It is a narrow, engineer-friendly monitoring and evidence system for high-value controls.
+**Alerts when:** Any control transitions from passing to failing, and again if it remains failing on the next scheduled run.
 
-## Why This Exists
+> **Note:** A mock data mode is available if you want to explore the dashboard before connecting real systems — you don't need API keys to get started.
 
-Most compliance programs treat control monitoring as a point-in-time exercise: an auditor asks "is MFA enforced?" and someone screenshots the Okta policy page. That evidence is stale the moment it's captured. Between audits, controls drift — someone disables branch protection for a hotfix and forgets to re-enable it, an IAM key ages past rotation policy, a new S3 bucket gets created without encryption.
+---
 
-OCULUS was built by a GRC practitioner who wanted continuous proof instead of periodic posture claims. It runs the same checks an auditor would run, on a schedule, and stores the results with timestamps and evidence. When the auditor asks "was this control in place all quarter?", the answer is a time-series of pass/fail results with evidence snapshots — not a screenshot from last Tuesday.
+## Table of Contents
 
-## Controls
+1. [What you need before starting](#1-what-you-need-before-starting)
+2. [Setup: Docker (recommended)](#2-setup-docker-recommended)
+3. [Setup: Local development](#3-setup-local-development)
+4. [Getting your API credentials](#4-getting-your-api-credentials)
+5. [Configuring Slack alerts](#5-configuring-slack-alerts)
+6. [Using the dashboard](#6-using-the-dashboard)
+7. [Triggering manual runs](#7-triggering-manual-runs)
+8. [Adjusting check frequency](#8-adjusting-check-frequency)
+9. [Troubleshooting](#9-troubleshooting)
+10. [For developers](#10-for-developers)
 
-| Control | Connector | What it checks | Compliance |
-|---------|-----------|----------------|------------|
-| MFA Enforced | Okta | All active users have MFA enrolled | SOC 2, PCI DSS, NIST |
-| No Inactive Users | Okta | No active users inactive beyond threshold | SOC 2, ISO 27001 |
-| Branch Protection | GitHub | Critical repos have branch protection on default branch | SOC 2, NIST |
-| No Direct Push | GitHub | Critical repos block direct pushes to main | SOC 2, NIST |
-| Secret Scanning | GitHub | Secret scanning enabled on critical repos | SOC 2, ISO 27001, NIST |
-| Audit Logging | AWS CloudTrail | CloudTrail enabled in production accounts | SOC 2, PCI DSS, HIPAA |
-| Root MFA | AWS IAM | Root account has MFA enabled | SOC 2, PCI DSS, CIS |
-| No Stale Access Keys | AWS IAM | No active keys exceed rotation threshold | SOC 2, ISO 27001, PCI DSS |
-| Encryption at Rest | AWS S3 | All S3 buckets have default encryption | SOC 2, PCI DSS, HIPAA |
-| No Public S3 | AWS S3 | No S3 buckets allow public access | SOC 2, PCI DSS, CIS |
+---
 
-## Quick Start
+## 1. What you need before starting
 
-### With Docker
+**For Docker setup (recommended):**
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
+
+**For local development:**
+- Python 3.12+, Node.js 18+, and a PostgreSQL database
+
+**API credentials (optional for mock mode, required for real data):**
+- Okta API token
+- GitHub personal access token
+- AWS access key with read-only IAM and S3 permissions
+- Slack webhook URL (for alerts)
+
+---
+
+## 2. Setup: Docker (recommended)
+
+Docker starts everything — the backend, the dashboard, and the database — with a single command.
+
+### Step 1 — Install Docker Desktop
+
+Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) and confirm it's running (whale icon in menu bar/system tray).
+
+### Step 2 — Clone OCULUS
+
+```bash
+git clone https://github.com/DuuMayne/OCULUS.git
+cd OCULUS
+```
+
+### Step 3 — Configure credentials (or skip for mock mode)
 
 ```bash
 cp .env.example .env
-# Edit .env with your connector credentials (or leave blank for mock data)
-
-docker compose up
 ```
 
-### Without Docker
+Open `.env` in any text editor. You can leave everything blank to start with mock data, or fill in credentials for the systems you want to monitor. See [section 4](#4-getting-your-api-credentials) for how to get each credential.
 
-Requires Python 3.12+, Node.js 20+, and Postgres.
+```
+# Leave these blank to use mock data:
+OKTA_DOMAIN=your-org.okta.com
+OKTA_API_TOKEN=
+
+GITHUB_TOKEN=
+
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=us-east-1
+
+# Optional — Slack alerts:
+SLACK_WEBHOOK_URL=
+```
+
+### Step 4 — Start OCULUS
 
 ```bash
-# 1. Database
+docker compose up -d --build
+```
+
+This starts three containers: the database, the backend API, and the frontend. The `--build` step takes 3–5 minutes the first time.
+
+### Step 5 — Open the dashboard
+
+- **Dashboard:** [http://localhost:3000](http://localhost:3000)
+- **API docs** (optional): [http://localhost:8000/docs](http://localhost:8000/docs)
+
+**To stop:**
+```bash
+docker compose down
+```
+
+**To update:**
+```bash
+git pull
+docker compose up -d --build
+```
+
+---
+
+## 3. Setup: Local development
+
+Use this if you want to modify the code or run without Docker. This setup is more involved — Docker is recommended unless you need to make code changes.
+
+### Prerequisites
+
+Install:
+- Python 3.12 (`python3 --version`)
+- Node.js 18+ (`node --version`)
+- PostgreSQL 16 (`psql --version`)
+
+### Step 1 — Set up the database
+
+```bash
 createdb oculus
 psql -c "CREATE USER oculus WITH PASSWORD 'oculus'; GRANT ALL ON DATABASE oculus TO oculus;"
+```
 
-# 2. Backend
+### Step 2 — Set up the backend
+
+```bash
 cd backend
-python3.12 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+Copy and configure the environment file:
+```bash
+cp ../.env.example ../.env
+# Edit .env with your credentials
+```
+
+Run database migrations and seed the control definitions:
+```bash
 export DATABASE_URL=postgresql://oculus:oculus@localhost:5432/oculus
 alembic upgrade head
 python -m app.seed
-uvicorn app.main:app --reload --port 8000
+```
 
-# 3. Frontend (separate terminal)
+Start the backend:
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+### Step 3 — Set up the frontend (new terminal)
+
+```bash
 cd frontend
 npm install
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-Open:
-- **Dashboard:** http://localhost:3000
-- **API docs:** http://localhost:8000/docs
-- **Health:** http://localhost:8000/api/health
+Open **[http://localhost:3000](http://localhost:3000)**.
 
-The scheduler runs all controls on startup and every 6 hours (configurable via `DEFAULT_CADENCE_SECONDS`). Without real credentials, controls run against realistic mock data.
+---
 
-## API
+## 4. Getting your API credentials
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/health` | Service health + scheduler status |
-| GET | `/api/connectors` | List registered connectors + credential status |
-| GET | `/api/controls` | List controls with current state |
-| GET | `/api/controls/{id}` | Control detail |
-| GET | `/api/controls/{id}/runs` | Run history |
-| GET | `/api/controls/{id}/runs/latest` | Latest run with evidence + failures |
-| POST | `/api/controls/{id}/run` | Trigger ad-hoc run |
-| PATCH | `/api/controls/{id}/cadence` | Update run frequency (body: `{"cadence_seconds": 3600}`) |
-| DELETE | `/api/controls/{id}/runs?before=ISO_DATE` | Delete old runs (omit `before` to delete all) |
-| GET | `/api/runs/{id}` | Single run detail |
-| GET | `/api/failures` | All currently failing resources |
+### Okta
 
-## Architecture
+1. Log into your Okta admin console (e.g. `yourorg-admin.okta.com`)
+2. Go to **Security → API → Tokens**
+3. Click **Create Token** → name it "OCULUS"
+4. Copy the token — you won't see it again
 
+Set `OKTA_DOMAIN` to your Okta domain (e.g. `earnest.okta.com`, without `https://`).
+
+### GitHub
+
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
+2. Click **Generate new token (classic)**
+3. Name it "OCULUS", set expiration to 1 year
+4. Select scopes: `repo` (read), `read:org`
+5. Click **Generate token** and copy it
+
+### AWS
+
+OCULUS only reads from AWS — it never modifies anything. You need an IAM user or role with read-only permissions.
+
+**Recommended: create a dedicated IAM user**
+1. In the AWS console, go to **IAM → Users → Create user**
+2. Name it `oculus-readonly`
+3. Attach these managed policies:
+   - `ReadOnlyAccess` (covers CloudTrail, IAM, S3)
+4. Go to the user's **Security credentials** tab → **Create access key**
+5. Copy the **Access Key ID** and **Secret Access Key**
+
+Set `AWS_DEFAULT_REGION` to your primary AWS region (e.g. `us-east-1`).
+
+---
+
+## 5. Configuring Slack alerts
+
+OCULUS sends Slack messages when a control fails for the first time, and again if it's still failing on the next run.
+
+### Create a Slack webhook
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From scratch**
+2. Name it "OCULUS Alerts" and select your workspace
+3. Go to **Incoming Webhooks** → toggle **Activate Incoming Webhooks** on
+4. Click **Add New Webhook to Workspace** → choose the channel (e.g. `#security-alerts`)
+5. Copy the webhook URL (starts with `https://hooks.slack.com/services/...`)
+
+Set `SLACK_WEBHOOK_URL` to that URL in your `.env` file.
+
+**Example alert:**
 ```
-Scheduler (APScheduler) -> Connectors (Okta/GitHub/AWS) -> External APIs
-                        -> Evaluators (per-control)     -> Results (Postgres)
-                        -> Alerting (Slack)
-                        -> FastAPI + Next.js (UI/API)
-```
-
-- **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic, APScheduler
-- **Database:** Postgres 16
-- **Frontend:** Next.js, TypeScript, Tailwind CSS
-- **Containerized:** Docker Compose
-
-**Key design principle:** Connectors fetch data. Evaluators decide. Evaluators are pure deterministic functions — no API calls, no side effects. This makes them trivially testable.
-
-## Adding a New Connector
-
-Connectors self-register. To add a new one (e.g., Jira, Datadog, Azure):
-
-### 1. Add credentials to `backend/app/config.py`
-
-```python
-class Settings(BaseSettings):
-    # ...existing fields...
-    jira_url: str = ""
-    jira_token: str = ""
-```
-
-### 2. Create the connector file
-
-Create `backend/app/connectors/jira.py`:
-
-```python
-from __future__ import annotations
-import logging
-import httpx
-from app.config import settings
-from app.connectors.base import ConnectorBase, register_connector
-
-logger = logging.getLogger("oculus.connectors.jira")
-
-@register_connector
-class JiraConnector(ConnectorBase):
-    """Fetches data from Jira REST API."""
-
-    # Required: unique type string, matched by controls.connector_type
-    connector_type = "jira"
-
-    # Required: Settings field names — if all are set, the real connector is used.
-    # If any are empty, the system falls back to mock_data automatically.
-    required_env = ["jira_url", "jira_token"]
-
-    # Required: mock data returned when credentials aren't configured.
-    # Should be realistic enough to test evaluators against.
-    mock_data = {
-        "issues": [
-            {"key": "SEC-1", "status": "Open", "priority": "Critical", "age_days": 45},
-            {"key": "SEC-2", "status": "Closed", "priority": "High", "age_days": 10},
-        ]
-    }
-
-    def test_connection(self) -> bool:
-        try:
-            resp = httpx.get(f"{settings.jira_url}/rest/api/2/myself",
-                headers={"Authorization": f"Bearer {settings.jira_token}"}, timeout=10)
-            return resp.status_code == 200
-        except Exception as e:
-            logger.error(f"Jira connection test failed: {e}")
-            return False
-
-    def fetch(self, config: dict) -> dict:
-        # Fetch whatever data your evaluators need.
-        # The config dict comes from the control's config_json field.
-        # Return a normalized dict that evaluators can consume.
-        ...
+⚠️ OCULUS: Control Failed
+Control: MFA Enforced (Okta)
+Status: FAIL
+Failing resources: user@company.com, admin@company.com
+Time: 2026-06-08 14:32:11 UTC
 ```
 
-### 3. Register the import
+---
 
-Add to `backend/app/connectors/__init__.py`:
+## 6. Using the dashboard
 
-```python
-from app.connectors.jira import JiraConnector  # noqa: F401
-```
+The main dashboard shows all 10 controls at a glance:
+- **Green checkmark** — last run passed
+- **Red X** — last run failed; click to see which resources are failing
+- **Gray clock** — never run (click the control to trigger a manual run)
 
-### 4. Add to `.env.example`
+Click any control to see:
+- Current status and which specific resources are failing
+- The full run history (every check with timestamp and evidence)
+- A raw evidence snapshot from the last run (the exact data returned by the API)
 
-```
-JIRA_URL=https://your-org.atlassian.net
-JIRA_TOKEN=your-api-token
-```
+The **Connectors** page shows whether your Okta, GitHub, and AWS credentials are working. A green dot means the connector authenticated successfully on the last run.
 
-The connector is now available. Any control with `connector_type: "jira"` will use it when credentials are configured, or fall back to mock data when they're not.
+---
 
-## Adding a New Evaluator
+## 7. Triggering manual runs
 
-Evaluators are pure functions: they receive data from a connector and return pass/fail with evidence.
+By default, OCULUS checks all controls every 6 hours. To trigger an immediate check:
 
-### 1. Create the evaluator file
+**From the dashboard:** Click a control → **Run Now** button.
 
-Create `backend/app/evaluators/your_control.py`:
-
-```python
-from __future__ import annotations
-from app.evaluators.base import EvaluatorBase, EvaluationResult, FailingResource
-
-class YourControlEvaluator(EvaluatorBase):
-    """Describe what this control checks.
-
-    Expected data from connector:
-        { "items": [{"id": "...", "compliant": true}, ...] }
-    """
-
-    def evaluate(self, data: dict, config: dict) -> EvaluationResult:
-        items = data.get("items", [])
-        if not items:
-            return EvaluationResult(
-                status="error",
-                summary="No data returned from connector",
-            )
-
-        non_compliant = [i for i in items if not i.get("compliant")]
-
-        failures = [
-            FailingResource(
-                resource_type="item",
-                resource_identifier=i["id"],
-                details={"reason": "Not compliant"},
-            )
-            for i in non_compliant
-        ]
-
-        evidence = {
-            "total": len(items),
-            "compliant": len(items) - len(non_compliant),
-            "non_compliant": len(non_compliant),
-        }
-
-        if non_compliant:
-            return EvaluationResult(
-                status="fail",
-                summary=f"{len(non_compliant)} of {len(items)} items are non-compliant",
-                evidence=evidence,
-                failures=failures,
-                metadata={"evaluator": "your_control"},
-            )
-
-        return EvaluationResult(
-            status="pass",
-            summary=f"All {len(items)} items are compliant",
-            evidence=evidence,
-            metadata={"evaluator": "your_control"},
-        )
-```
-
-### 2. Register in the evaluator registry
-
-Add to `backend/app/evaluators/registry.py`:
-
-```python
-from app.evaluators.your_control import YourControlEvaluator
-
-EVALUATOR_REGISTRY: dict[str, type[EvaluatorBase]] = {
-    # ...existing entries...
-    "your_control": YourControlEvaluator,
-}
-```
-
-### 3. Add the control definition
-
-Add to the `CONTROLS` list in `backend/app/seed.py`:
-
-```python
-{
-    "key": "your_control",
-    "name": "Human-Readable Control Name",
-    "description": "What this control checks and why it matters.",
-    "owner": "Team Name",
-    "connector_type": "jira",          # must match a registered connector
-    "evaluator_type": "your_control",  # must match the registry key
-    "config_json": {},                 # control-specific config passed to connector and evaluator
-},
-```
-
-Then re-run the seed: `python -m app.seed` (idempotent — skips existing controls).
-
-## Adding and Running Tests
-
-Tests live in `backend/tests/`. The project uses pytest.
-
-### Running tests
-
+**Via the API:**
 ```bash
-cd backend
-source .venv/bin/activate   # or use Docker
-python -m pytest tests/ -v
+curl -X POST http://localhost:8000/api/controls/mfa-enforced/run
 ```
 
-### Evaluator tests (unit tests)
+Replace `mfa-enforced` with the control ID shown in the dashboard URL.
 
-Evaluators are pure functions — test them with fixture data, no mocking needed.
-
-Create `backend/tests/test_evaluators/test_your_control.py`:
-
-```python
-from app.evaluators.your_control import YourControlEvaluator
-
-evaluator = YourControlEvaluator()
-
-
-def test_all_compliant():
-    data = {"items": [{"id": "a", "compliant": True}]}
-    r = evaluator.evaluate(data, {})
-    assert r.status == "pass"
-    assert len(r.failures) == 0
-
-
-def test_non_compliant_fails():
-    data = {"items": [
-        {"id": "a", "compliant": True},
-        {"id": "b", "compliant": False},
-    ]}
-    r = evaluator.evaluate(data, {})
-    assert r.status == "fail"
-    assert len(r.failures) == 1
-    assert r.failures[0].resource_identifier == "b"
-
-
-def test_no_data_returns_error():
-    r = evaluator.evaluate({}, {})
-    assert r.status == "error"
-
-
-def test_evidence_structure():
-    data = {"items": [{"id": "a", "compliant": True}, {"id": "b", "compliant": False}]}
-    r = evaluator.evaluate(data, {})
-    assert r.evidence["total"] == 2
-    assert r.evidence["compliant"] == 1
-    assert r.evidence["non_compliant"] == 1
+**To check all controls right now:**
+```bash
+for id in mfa-enforced no-inactive-users branch-protection no-direct-push \
+          secret-scanning audit-logging root-mfa no-stale-keys \
+          encryption-at-rest no-public-s3; do
+  curl -s -X POST http://localhost:8000/api/controls/$id/run > /dev/null
+  echo "Triggered: $id"
+done
 ```
 
-**Pattern:** Every evaluator should have tests for pass, fail, error, and evidence structure.
+---
 
-### Connector tests (mocked)
+## 8. Adjusting check frequency
 
-Connector tests mock the external API client to verify data normalization.
+The default schedule is every 6 hours (21,600 seconds). To change it:
 
-Create `backend/tests/test_connectors/test_jira.py`:
-
-```python
-from unittest.mock import patch, MagicMock
-from app.connectors.jira import JiraConnector
-
-
-@patch("app.connectors.jira.httpx.get")
-def test_fetch_normalizes_data(mock_get):
-    resp = MagicMock()
-    resp.json.return_value = [{"key": "SEC-1", "fields": {"status": {"name": "Open"}}}]
-    resp.raise_for_status = MagicMock()
-    mock_get.return_value = resp
-
-    connector = JiraConnector()
-    data = connector.fetch({"project": "SEC"})
-    assert "issues" in data
-
-
-@patch("app.connectors.jira.httpx.get")
-def test_connection_test(mock_get):
-    resp = MagicMock()
-    resp.status_code = 200
-    mock_get.return_value = resp
-    assert JiraConnector().test_connection() is True
-
-
-@patch("app.connectors.jira.httpx.get")
-def test_connection_failure(mock_get):
-    mock_get.side_effect = Exception("timeout")
-    assert JiraConnector().test_connection() is False
+**Via the API:**
+```bash
+# Check every hour (3600 seconds):
+curl -X PATCH http://localhost:8000/api/controls/mfa-enforced/cadence \
+  -H "Content-Type: application/json" \
+  -d '{"cadence_seconds": 3600}'
 ```
 
-**Pattern:** Mock the HTTP client (`httpx.get` or `boto3.client`), verify the connector normalizes responses into the expected dict structure.
+**Or set a global default** by changing `DEFAULT_CADENCE_SECONDS` in your `.env` file and restarting.
 
-### Test file naming
+Recommended schedules:
+- High-priority controls (MFA, root access): every 1–2 hours
+- Medium-priority (branch protection, encryption): every 6 hours
+- Low-priority: every 24 hours
 
+---
+
+## 9. Troubleshooting
+
+### Dashboard shows "mock data" even after setting credentials
+
+The mock fallback activates when a connector can't authenticate. Check:
+1. Your `.env` file has the correct values (no extra spaces, no quotes around values)
+2. The container was restarted after you edited `.env`: `docker compose restart backend`
+3. Check connector status at the bottom of the Connectors page for the specific error
+
+### "Connection refused" to the backend
+
+The containers may still be starting. Wait 30 seconds and refresh. If it persists:
+```bash
+docker compose logs backend
 ```
-tests/
-  test_evaluators/
-    test_mfa_enforced.py        # one file per evaluator
-    test_branch_protection.py
-    test_your_control.py
-  test_connectors/
-    test_okta.py                # one file per connector
-    test_github.py
-    test_your_connector.py
-  test_api/
-    test_controls.py            # API route tests
+Look for any error message on startup.
+
+### Okta connector failing
+
+- Confirm `OKTA_DOMAIN` has no `https://` prefix (just `yourorg.okta.com`)
+- The API token needs Read Only Admin or Super Admin privileges
+- Tokens expire — generate a new one if it's been more than 30 days
+
+### GitHub connector failing
+
+- Personal access tokens expire — check if yours needs renewal at [github.com/settings/tokens](https://github.com/settings/tokens)
+- The token needs `repo` (read) and `read:org` scopes
+
+### AWS connector failing
+
+- Verify the access key ID and secret are copied correctly (no trailing spaces)
+- The IAM user needs at minimum: `AmazonS3ReadOnlyAccess`, `CloudTrailReadOnlyAccess`, `IAMReadOnlyAccess`
+- Check `AWS_DEFAULT_REGION` matches where your resources are deployed
+
+### Controls not running on schedule
+
+Check that the scheduler is running:
+```bash
+curl http://localhost:8000/api/health
 ```
+The response should include `"scheduler_running": true`.
 
-## Configuration
+---
 
-**Environment variables** (`.env`):
+## 10. For developers
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | Postgres connection string |
-| `OKTA_DOMAIN` | No | Okta org domain (e.g., `your-org.okta.com`) |
-| `OKTA_API_TOKEN` | No | Okta Admin API token |
-| `GITHUB_TOKEN` | No | GitHub PAT with `repo` scope |
-| `AWS_ACCESS_KEY_ID` | No | AWS credentials for CloudTrail/IAM/S3 checks |
-| `AWS_SECRET_ACCESS_KEY` | No | AWS secret key |
-| `AWS_DEFAULT_REGION` | No | AWS region (default: `us-east-1`) |
-| `SLACK_WEBHOOK_URL` | No | Slack webhook for alerts |
-| `DEFAULT_CADENCE_SECONDS` | No | Global run interval (default: `21600` = 6 hours) |
+### Adding a new control
 
-All connector credentials are optional. Without them, controls run against built-in mock data — useful for development and demos.
+1. Create an evaluator in `backend/app/evaluators/` — it's a pure function that takes connector data and returns `pass`/`fail` with a list of failing resources
+2. Add a connector call in the appropriate `backend/app/connectors/` file if new data is needed
+3. Register the control definition in `backend/app/seed.py`
+4. Run `python -m app.seed` to add it to the database
 
-**Per-control config** is stored in the `config_json` column and passed to both the connector's `fetch()` and the evaluator's `evaluate()`. Examples:
+### Adding a new connector
 
-```json
-{"critical_repos": ["org/api-service", "org/web-app"]}
-{"inactivity_threshold_days": 90}
-{"max_key_age_days": 90}
-{"production_accounts": ["123456789012"]}
-```
+1. Create `backend/app/connectors/my_system.py` with a class extending `BaseConnector`
+2. Add credential checks to `backend/app/config.py`
+3. Update `.env.example` with the new variables
 
-## Alerting
+### Tech stack
+- **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic, APScheduler
+- **Frontend:** Next.js 16, TypeScript, Tailwind CSS
+- **Database:** PostgreSQL 16
 
-Slack alerts fire on:
-- **Pass to fail** transition
-- **Persistent failure** (every 3 consecutive failing runs)
-- **Evaluator/connector errors**
+### API documentation
 
-Configure via `SLACK_WEBHOOK_URL`. Leave empty to disable.
+Interactive API docs are available at [http://localhost:8000/docs](http://localhost:8000/docs) when running locally.
 
-## Development
-
-Designed, spec'd, and directed by a security/compliance practitioner. AI-assisted implementation using [Claude Code](https://claude.ai/code).
-
-The control definitions, evaluator logic, compliance mappings, and alerting thresholds come from real-world audit experience. The architecture — separating connectors (data fetching) from evaluators (pass/fail logic) — exists because that's how you make controls testable and auditable. The implementation was accelerated with AI tooling, but the design decisions reflect what actually matters when an auditor is sitting across the table from you.
+---
 
 ## License
 
-Apache 2.0 with Commons Clause — see [LICENSE](LICENSE).
+Apache 2.0 with Commons Clause. Free to use and modify for internal purposes; selling as a product requires permission. See [LICENSE](LICENSE) for full terms.
