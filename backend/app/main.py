@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.scheduler import start_scheduler, stop_scheduler
 from app.api.router import api_router
+import app.checks_bridge  # noqa: F401 — registers shared CHECKS library into OCULUS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("oculus")
