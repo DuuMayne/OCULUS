@@ -4,6 +4,22 @@ Continuously monitors your critical security controls and alerts you the moment 
 
 Connect your Okta, GitHub, and AWS accounts once. OCULUS handles the rest — running checks on a schedule, storing evidence snapshots, and giving you a live dashboard of what's passing and what's not.
 
+---
+
+## Part of the PANOPTICON Suite
+
+OCULUS is one piece of a three-part system for GRC engineers:
+
+| Tool | What it does | Repo |
+|------|-------------|------|
+| **[CHECKS](https://github.com/DuuMayne/CHECKS)** | Shared check library — deterministic pass/fail logic + connectors | The primitive |
+| **OCULUS** (this) | Runs checks continuously, stores results, alerts on drift | The monitor |
+| **[EXHIBIT](https://github.com/DuuMayne/EXHIBIT)** | Packages evidence for auditors — maps frameworks, generates explainers | The audit response |
+
+**How they connect:** CHECKS defines _what_ to check (config-driven). OCULUS runs those checks on a schedule and stores the results. When an auditor asks for evidence, EXHIBIT pulls check results from OCULUS (free, already computed) instead of making expensive API calls. Gaps that CHECKS can't cover get flagged in a coverage report — each gap is a roadmap item for a new evaluator.
+
+Each tool works independently. You don't need all three. But together they form a feedback loop: OCULUS monitors → EXHIBIT surfaces gaps → you build new checks → coverage improves.
+
 **What it monitors:**
 - **Okta:** MFA enrolled for all active users, no users inactive beyond threshold
 - **GitHub:** Branch protection on critical repos, no direct pushes to main, secret scanning enabled
@@ -350,8 +366,20 @@ The response should include `"scheduler_running": true`.
 
 ### Tech stack
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic, APScheduler
-- **Frontend:** Next.js 16, TypeScript, Tailwind CSS
+- **Frontend:** Next.js 15, React 19, TypeScript, Tailwind CSS
 - **Database:** PostgreSQL 16
+- **Shared library:** [CHECKS](https://github.com/DuuMayne/CHECKS) (connectors + evaluators)
+
+### Dev workflow
+
+```bash
+make install    # install deps + pre-commit hooks (one-time)
+make check      # run lint + security + tests (before committing)
+make format     # auto-fix style issues
+make dev        # start frontend dev server
+```
+
+Pre-commit hooks run automatically — `ruff` (lint/format) and `bandit` (security) gate every commit.
 
 ### API documentation
 
@@ -361,4 +389,4 @@ Interactive API docs are available at [http://localhost:8000/docs](http://localh
 
 ## License
 
-Apache 2.0 with Commons Clause. Free to use and modify for internal purposes; selling as a product requires permission. See [LICENSE](LICENSE) for full terms.
+Apache 2.0 — use it, modify it, share it. See [LICENSE](LICENSE) for full terms.
