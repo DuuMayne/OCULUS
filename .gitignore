@@ -20,5 +20,9 @@ node_modules/
 # OS
 .DS_Store
 
+# Build artifacts
+tsconfig.tsbuildinfo
+.pytest_cache/
+
 # Docker
 pgdata/
