@@ -12,11 +12,11 @@ OCULUS is one piece of a three-part system for GRC engineers:
 
 | Tool | What it does | Repo |
 |------|-------------|------|
-| **[CHECKS](https://github.com/DuuMayne/CHECKS)** | Shared check library — deterministic pass/fail logic + connectors | The primitive |
+| **[CHECKS](https://github.com/DuuMayne/CHECKS)** | Standalone check library — deterministic pass/fail logic + connectors | The primitive |
 | **OCULUS** (this) | Runs checks continuously, stores results, alerts on drift | The monitor |
 | **[EXHIBIT](https://github.com/DuuMayne/EXHIBIT)** | Packages evidence for auditors — maps frameworks, generates explainers | The audit response |
 
-**How they connect:** CHECKS defines _what_ to check (config-driven). OCULUS runs those checks on a schedule and stores the results. When an auditor asks for evidence, EXHIBIT pulls check results from OCULUS (free, already computed) instead of making expensive API calls. Gaps that CHECKS can't cover get flagged in a coverage report — each gap is a roadmap item for a new evaluator.
+**How they connect:** OCULUS has its own connectors and evaluators built in. CHECKS is a related standalone library with the same connector/evaluator pattern. When an auditor asks for evidence, EXHIBIT pulls check results from OCULUS (free, already computed) instead of making expensive API calls.
 
 Each tool works independently. You don't need all three. But together they form a feedback loop: OCULUS monitors → EXHIBIT surfaces gaps → you build new checks → coverage improves.
 
@@ -266,20 +266,22 @@ By default, OCULUS checks all controls every 6 hours. To trigger an immediate ch
 **From the dashboard:** Click a control → **Run Now** button.
 
 **Via the API:**
+
+The API uses UUIDs to identify controls. First, list controls to find their IDs:
 ```bash
-curl -X POST http://localhost:8000/api/controls/mfa-enforced/run
+# List all controls and their IDs
+curl http://localhost:8000/api/controls | jq '.[] | {id, key}'
 ```
 
-Replace `mfa-enforced` with the control ID shown in the dashboard URL.
-
-**To check all controls right now:**
+Then trigger a run for a specific control by its UUID:
 ```bash
-for id in mfa-enforced no-inactive-users branch-protection no-direct-push \
-          secret-scanning audit-logging root-mfa no-stale-keys \
-          encryption-at-rest no-public-s3; do
-  curl -s -X POST http://localhost:8000/api/controls/$id/run > /dev/null
-  echo "Triggered: $id"
-done
+# Trigger a run for a specific control by ID
+curl -X POST http://localhost:8000/api/controls/<uuid>/run
+```
+
+For example, if the `mfa_enforced` control has ID `a1b2c3d4-...`:
+```bash
+curl -X POST http://localhost:8000/api/controls/a1b2c3d4-.../run
 ```
 
 ---
@@ -368,7 +370,6 @@ The response should include `"scheduler_running": true`.
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic, APScheduler
 - **Frontend:** Next.js 15, React 19, TypeScript, Tailwind CSS
 - **Database:** PostgreSQL 16
-- **Shared library:** [CHECKS](https://github.com/DuuMayne/CHECKS) (connectors + evaluators)
 
 ### Dev workflow
 
