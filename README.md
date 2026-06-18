@@ -255,7 +255,7 @@ Click any control to see:
 - The full run history (every check with timestamp and evidence)
 - A raw evidence snapshot from the last run (the exact data returned by the API)
 
-The **Connectors** page shows whether your Okta, GitHub, and AWS credentials are working. A green dot means the connector authenticated successfully on the last run.
+The **Admin** page shows whether your Okta, GitHub, and AWS credentials are working. A green dot means the connector authenticated successfully on the last run.
 
 ---
 
