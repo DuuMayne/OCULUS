@@ -390,4 +390,11 @@ Interactive API docs are available at [http://localhost:8000/docs](http://localh
 
 ## License
 
-Apache 2.0 with Commons Clause — free to use and modify, but the Commons Clause restricts selling the software or offering it as a hosted service. See [LICENSE](LICENSE) for full terms.
+| What | License |
+|---|---|
+| Source code | [Elastic License 2.0](LICENSE) |
+| Documentation & templates | [CC BY-NC 4.0](LICENSE-docs) |
+
+Free for anyone to use, fork, and build on — including commercially within your own organization. The one restriction: you cannot offer this software as a paid hosted or managed service. See [LICENSE](LICENSE) for full terms.
+
+Copyright 2026 Adam Duman
